@@ -18,11 +18,11 @@ from onmt.utils.parse import ArgumentParser
 
 dataset_root_path = '/Volumes/Extreme SSD/JP_EN_Translation_Data/pairwise_sentences'
 dataset_files = [file for file in os.listdir(dataset_root_path) if not file.startswith('.')]
-model_file_path = '/Volumes/Extreme SSD/OpenNMTModels/demo_jp-en_20k-model_step_400000.pt'
-logging_file_path = '/Volumes/Extreme SSD/OpenNMTModels/per_dataset_eval_log.txt'
+model_file_path = '/Volumes/Extreme SSD/OpenNMTModels/demo_jp-en_20k-model_step_800000.pt'
+logging_file_path = '/Volumes/Extreme SSD/OpenNMTModels/per_dataset_eval_log_800000.txt'
 sentences_per_dataset_max = 1000
 
-# dataset_files = ['test_jp_spaced.txt', 'test_en_spaced.txt'] # test
+dataset_files = ['twitter_jp_spaced.txt', 'twitter_en_spaced.txt', 'wat2017_jp_spaced.txt', 'wat2017_en_spaced.txt'] # test
 
 
 def evaluate_translation_on_datasets(opt):
