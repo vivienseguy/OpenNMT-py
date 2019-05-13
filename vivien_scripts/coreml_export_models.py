@@ -107,30 +107,7 @@ class EncoderForCoreMLExport(nn.Module):
 
                 input_sequence = output_sequence
 
-        return torch.cat([h_t, h_t_reverse], dim=1), 0.
-
-
-
-
-
-
-
-
-
-
-
-
-        # for layer_index in range(self.num_layers):
-        #
-        #     rnn_cell = self.decomposed_model_list[layer_index * (1 + self.bidirectional)]
-        #     h, c = rnn_cell(x, hidden if hidden else self.init_hidden(batch_size))
-
-
-
-
-        return h, c
-
-
+        return torch.cat([h_t, h_t_reverse], dim=1)  if self.bidirectional else  h_t, 0.
 
 
 
@@ -139,16 +116,59 @@ class SingleLayerLSTMForCoreMLExport(nn.Module):
 
     def __init__(self, input_size, hidden_size):
         super(SingleLayerLSTMForCoreMLExport, self).__init__()
+        self.input_size = input_size
+        self.hidden_size = hidden_size
         self.rnn_cell = nn.LSTMCell(input_size=input_size, hidden_size=hidden_size)
 
     def init_hidden(self, batch_size):
-        h = torch.zeros(batch_size, self.rnn_hidden_size)
-        c = torch.zeros(batch_size, self.rnn_hidden_size)
+        h = torch.zeros(batch_size, self.hidden_size)
+        c = torch.zeros(batch_size, self.hidden_size)
         return (h, c)
 
     def forward(self, x, hidden=None):
         batch_size, input_size = x.shape
-        assert batch_size == 1
+        # assert batch_size == 1
         h, c = self.rnn_cell(x, hidden if hidden else self.init_hidden(batch_size))
         return h, c
+
+
+
+class MultiLayerLSTMForCoreMLExport(nn.Module):
+
+    def __init__(self, input_size, hidden_size, num_layers):
+        super(MultiLayerLSTMForCoreMLExport, self).__init__()
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
+        self.rnn_cells = []
+        for layer_index in range(num_layers):
+            self.rnn_cells.append(nn.LSTMCell(input_size=input_size if layer_index == 0 else hidden_size, hidden_size=hidden_size))
+            setattr(self, 'rnn_cell{}'.format(layer_index), self.rnn_cells[layer_index])
+
+    def init_hidden(self, batch_size):
+        hidden_list = []
+        for layer_index in range(self.num_layers):
+            h = torch.zeros(batch_size, self.hidden_size)
+            c = torch.zeros(batch_size, self.hidden_size)
+            hidden_list.append((h, c))
+        return hidden_list
+
+
+    def forward(self, x, hidden_list=None):
+
+        batch_size, input_size = x.shape
+
+        input = x
+        h_list = []
+        c_list = []
+        hidden_list = hidden_list if hidden_list else self.init_hidden(batch_size)
+        for layer_index in range(self.num_layers):
+            rnn_cell = self.rnn_cells[layer_index]
+            h, c = rnn_cell(input, hidden_list[layer_index])
+            input = h
+            h_list.append(h)
+            c_list.append(c)
+
+        return list(zip(h_list, c_list))
+
 
