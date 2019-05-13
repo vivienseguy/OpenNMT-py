@@ -2,6 +2,8 @@ from __future__ import unicode_literals
 from itertools import repeat
 import os
 import torch
+from torch import nn
+import numpy as np
 import re
 import json
 import onmt
@@ -76,6 +78,70 @@ def translate_with_submodels(src_file, fields, src_embeddings, decomposed_encode
     tgt_bos_idx = tgt_vocab.stoi[tgt_field.init_token]
     tgt_unk_idx = tgt_vocab.stoi[tgt_field.unk_token]
     tgt_vocab_len = len(tgt_vocab)
+
+    with open(src_file, 'r') as file:
+        line = file.readlines()[0]
+
+    words = line.split(' ')
+    word_indices = [src_vocab.stoi[word] for word in words]
+    src_length = len(word_indices)
+
+    coreml_encoder = EncoderForCoreMLExport(decomposed_encoders[0].input_size, decomposed_encoders[0].hidden_size,
+                                            decomposed_model_list=decomposed_encoders, num_layers=len(decomposed_encoders)//2,
+                                            bidirectional=True)
+
+    src_indices = torch.Tensor(np.array(word_indices)).view([len(word_indices), 1, 1]).long()
+    encoder_input = src_embeddings(src_indices)
+    hidden_list, memory_bank = coreml_encoder(encoder_input)
+
+    tgt_word_index = tgt_bos_idx
+
+
+    output_word_index = 0
+    while tgt_word_index != tgt_eos_idx:
+
+        decoder_rnn_input = tgt_embeddings(torch.Tensor(np.array(tgt_word_index)).view([1, 1, 1]).long())
+        decoder_rnn_output, hidden_list = decoder_rnn(decoder_rnn_input, hidden_list)
+
+        h_t = attn_linear_in(decoder_rnn_output)
+        scores = torch.bmm(h_t, memory_bank.transpose(1, 2))
+
+        align_vectors = nn.functional.softmax(scores.view(1, -1), -1)
+
+        c = torch.bmm(align_vectors, memory_bank)
+        concat_c = torch.cat([c, decoder_rnn_output], 2).view(1, -1)
+
+        attn_h = attn_linear_out(concat_c).view(1, 1, -1)
+        attn_h = torch.tanh(attn_h)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

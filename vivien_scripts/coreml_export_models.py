@@ -80,6 +80,8 @@ class EncoderForCoreMLExport(nn.Module):
         input_sequence = list(x.split(1))
         output_sequence = []
         output_sequence_reverse = []
+        final_hs = []
+        final_cs = []
 
         for layer_index in range(self.num_layers):
 
@@ -97,6 +99,9 @@ class EncoderForCoreMLExport(nn.Module):
                     h_t_reverse, c_t_reverse = rnn_cell(input_sequence[t].view([1, -1]), hidden_input_list[layer_index * (1 + self.bidirectional) + 1] if t == 0 else (h_t_reverse, c_t_reverse))
                     output_sequence_reverse.append(h_t_reverse)
 
+                final_hs.append(torch.cat([h_t, h_t_reverse]))
+                final_cs.append(torch.cat([c_t, c_t_reverse]))
+
                 outputs_concat = []
                 for t in range(len(input_sequence)):
                     outputs_concat.append(torch.cat([output_sequence[t], output_sequence_reverse[len(input_sequence)-1-t]], dim=1))
@@ -105,9 +110,11 @@ class EncoderForCoreMLExport(nn.Module):
 
             else:
 
+                final_hs.append(h_t)
+                final_cs.append(c_t)
                 input_sequence = output_sequence
 
-        return torch.cat([h_t, h_t_reverse], dim=1)  if self.bidirectional else  h_t, 0.
+        return list(zip(final_hs, final_cs)), input_sequence
 
 
 
