@@ -63,91 +63,65 @@ def test_rnn_and_coreml_models_equality(rnn_model, coreml_model):
 def translate_with_submodels(src_file, fields, src_embeddings, decomposed_encoders, tgt_embeddings, decoder_rnn, attn_linear_in,
                              attn_linear_out, generator):
 
-    src_field = dict(fields)["src"].base_field
-    src_vocab = src_field.vocab
-    src_eos_idx = src_vocab.stoi[src_field.eos_token]
-    src_pad_idx = src_vocab.stoi[src_field.pad_token]
-    src_bos_idx = src_vocab.stoi[src_field.init_token]
-    src_unk_idx = src_vocab.stoi[src_field.unk_token]
-    src_vocab_len = len(src_vocab)
+    with torch.no_grad():
 
-    tgt_field = dict(fields)["tgt"].base_field
-    tgt_vocab = tgt_field.vocab
-    tgt_eos_idx = tgt_vocab.stoi[tgt_field.eos_token]
-    tgt_pad_idx = tgt_vocab.stoi[tgt_field.pad_token]
-    tgt_bos_idx = tgt_vocab.stoi[tgt_field.init_token]
-    tgt_unk_idx = tgt_vocab.stoi[tgt_field.unk_token]
-    tgt_vocab_len = len(tgt_vocab)
+        src_field = dict(fields)["src"].base_field
+        src_vocab = src_field.vocab
+        src_eos_idx = src_vocab.stoi[src_field.eos_token]
+        src_pad_idx = src_vocab.stoi[src_field.pad_token]
+        src_bos_idx = src_vocab.stoi[src_field.init_token]
+        src_unk_idx = src_vocab.stoi[src_field.unk_token]
+        src_vocab_len = len(src_vocab)
 
-    with open(src_file, 'r') as file:
-        line = file.readlines()[0]
+        tgt_field = dict(fields)["tgt"].base_field
+        tgt_vocab = tgt_field.vocab
+        tgt_eos_idx = tgt_vocab.stoi[tgt_field.eos_token]
+        tgt_pad_idx = tgt_vocab.stoi[tgt_field.pad_token]
+        tgt_bos_idx = tgt_vocab.stoi[tgt_field.init_token]
+        tgt_unk_idx = tgt_vocab.stoi[tgt_field.unk_token]
+        tgt_vocab_len = len(tgt_vocab)
 
-    words = line.split(' ')
-    word_indices = [src_vocab.stoi[word] for word in words]
-    src_length = len(word_indices)
+        with open(src_file, 'r') as file:
+            line = file.readlines()[0]
 
-    coreml_encoder = EncoderForCoreMLExport(decomposed_encoders[0].input_size, decomposed_encoders[0].hidden_size,
-                                            decomposed_model_list=decomposed_encoders, num_layers=len(decomposed_encoders)//2,
-                                            bidirectional=True)
+        words = line.split('　')
+        word_indices = [src_vocab.stoi[word] for word in words]
+        src_length = len(word_indices)
 
-    src_indices = torch.Tensor(np.array(word_indices)).view([len(word_indices), 1, 1]).long()
-    encoder_input = src_embeddings(src_indices)
-    hidden_list, memory_bank = coreml_encoder(encoder_input)
+        coreml_encoder = EncoderForCoreMLExport(decomposed_encoders[0].input_size, decomposed_encoders[0].hidden_size,
+                                                decomposed_model_list=decomposed_encoders, num_layers=len(decomposed_encoders)//2,
+                                                bidirectional=True)
 
-    tgt_word_index = tgt_bos_idx
+        src_indices = torch.Tensor(np.array(word_indices)).view([len(word_indices), 1, 1]).long()
+        encoder_input = src_embeddings(src_indices)
+        hidden_list, memory_bank = coreml_encoder(encoder_input)
 
+        tgt_word_index = tgt_bos_idx
 
-    output_word_index = 0
-    while tgt_word_index != tgt_eos_idx:
+        output_word_index = 0
+        while tgt_word_index != tgt_eos_idx:
 
-        decoder_rnn_input = tgt_embeddings(torch.Tensor(np.array(tgt_word_index)).view([1, 1, 1]).long())
-        decoder_rnn_output, hidden_list = decoder_rnn(decoder_rnn_input, hidden_list)
+            decoder_rnn_input = tgt_embeddings(torch.Tensor(np.array([tgt_word_index])).view([1, 1, 1]).long())
+            decoder_rnn_input = decoder_rnn_input.view([1, -1])
+            hidden_list = decoder_rnn(decoder_rnn_input, hidden_list)
+            decoder_rnn_output = hidden_list[-1][0]
 
-        h_t = attn_linear_in(decoder_rnn_output)
-        scores = torch.bmm(h_t, memory_bank.transpose(1, 2))
+            h_t = attn_linear_in(decoder_rnn_output)
+            scores = torch.matmul(h_t, memory_bank.squeeze().transpose(0, 1))
 
-        align_vectors = nn.functional.softmax(scores.view(1, -1), -1)
+            align_vectors = nn.functional.softmax(scores.view(1, -1), -1)
 
-        c = torch.bmm(align_vectors, memory_bank)
-        concat_c = torch.cat([c, decoder_rnn_output], 2).view(1, -1)
+            c = torch.bmm(align_vectors.unsqueeze(0), memory_bank.transpose(0, 1))
+            concat_c = torch.cat([c, decoder_rnn_output.unsqueeze(1)], 2).view(1, -1)
 
-        attn_h = attn_linear_out(concat_c).view(1, 1, -1)
-        attn_h = torch.tanh(attn_h)
+            attn_h = attn_linear_out(concat_c).view(1, 1, -1)
+            attn_h = torch.tanh(attn_h)
 
+            output = generator(attn_h)
 
+            tgt_word_index = torch.argmax(output, dim=-1).detach()
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+            print(tgt_vocab.itos[tgt_word_index])
 
     return
 
@@ -169,40 +143,40 @@ def pytorch_to_onnx(opt):
 
 
     src_embeddings = model[1].encoder.embeddings
-    embeddings_input = torch.zeros((1, 1, 1)).long()
-    input_names = ['input_index']
-    output_names = ['embedding']
-    torch.onnx.export(src_embeddings, embeddings_input,
-                      os.path.join(model_file_folder, 'src_embeddings.onnx'),
-                      verbose=True, input_names=input_names, output_names=output_names
-                      )
+    # embeddings_input = torch.zeros((1, 1, 1)).long()
+    # input_names = ['input_index']
+    # output_names = ['embedding']
+    # torch.onnx.export(src_embeddings, embeddings_input,
+    #                   os.path.join(model_file_folder, 'src_embeddings.onnx'),
+    #                   verbose=True, input_names=input_names, output_names=output_names
+    #                   )
 
 
     encoder = model[1].encoder.rnn
     encoder_models = decompose_bnn_lstm(encoder)
-    coreml_encoder = EncoderForCoreMLExport(encoder.input_size, encoder.hidden_size, decomposed_model_list=encoder_models, num_layers=encoder.num_layers, bidirectional=encoder.bidirectional)
-    test_rnn_and_coreml_models_equality(encoder, coreml_encoder)
-    num_directions = 1 + encoder.bidirectional
-    for layer_index in range(encoder.num_layers):
-        for direction in range(num_directions):
-            encoder_model_part = encoder_models[layer_index * num_directions + direction]
-            encoder_input = (torch.randn(1, encoder.input_size if layer_index == 0 else encoder.hidden_size * num_directions),
-                             encoder_model_part.init_hidden(batch_size=1))
-            input_names = ['input', 'h', 'c']
-            output_names = ['h', 'c']
-            torch.onnx.export(encoder_model_part, encoder_input,
-                              os.path.join(model_file_folder, 'encoder_model_{}.onnx'.format(layer_index * num_directions + direction)),
-                              verbose=True, input_names=input_names, output_names=output_names)
+    # coreml_encoder = EncoderForCoreMLExport(encoder.input_size, encoder.hidden_size, decomposed_model_list=encoder_models, num_layers=encoder.num_layers, bidirectional=encoder.bidirectional)
+    # test_rnn_and_coreml_models_equality(encoder, coreml_encoder)
+    # num_directions = 1 + encoder.bidirectional
+    # for layer_index in range(encoder.num_layers):
+    #     for direction in range(num_directions):
+    #         encoder_model_part = encoder_models[layer_index * num_directions + direction]
+    #         encoder_input = (torch.randn(1, encoder.input_size if layer_index == 0 else encoder.hidden_size * num_directions),
+    #                          encoder_model_part.init_hidden(batch_size=1))
+    #         input_names = ['input', 'h', 'c']
+    #         output_names = ['h', 'c']
+    #         torch.onnx.export(encoder_model_part, encoder_input,
+    #                           os.path.join(model_file_folder, 'encoder_model_{}.onnx'.format(layer_index * num_directions + direction)),
+    #                           verbose=True, input_names=input_names, output_names=output_names)
 
 
     tgt_embeddings = model[1].decoder.embeddings
     embeddings_input = torch.zeros((1, 1, 1)).long()
-    input_names = ['input_index']
-    output_names = ['embedding']
-    torch.onnx.export(tgt_embeddings, embeddings_input,
-                      os.path.join(model_file_folder, 'tgt_embeddings.onnx'),
-                      verbose=True, input_names=input_names, output_names=output_names
-                      )
+    # input_names = ['input_index']
+    # output_names = ['embedding']
+    # torch.onnx.export(tgt_embeddings, embeddings_input,
+    #                   os.path.join(model_file_folder, 'tgt_embeddings.onnx'),
+    #                   verbose=True, input_names=input_names, output_names=output_names
+    #                   )
 
 
     decoder_rnn = model[1].decoder.rnn
@@ -215,43 +189,43 @@ def pytorch_to_onnx(opt):
                 rnn_key = re.sub(r'rnn_cell\d\.', '', coreml_key) + '_l' + '{}'.format(layer_index)
                 coreml_model_state_dict[coreml_key] = state_dict[rnn_key]
         coreml_decoder_rnn.load_state_dict(coreml_model_state_dict)
-    decoder_rnn_input = (torch.randn(1, decoder_rnn.input_size),
-                         coreml_decoder_rnn.init_hidden(batch_size=1))
-    input_names = ['input']
-    output_names = []
-    for layer_index in range(decoder_rnn.num_layers):
-        input_names += ['h{}'.format(layer_index), 'c{}'.format(layer_index)]
-        output_names += ['h{}'.format(layer_index), 'c{}'.format(layer_index)]
-    torch.onnx.export(coreml_decoder_rnn, decoder_rnn_input,
-                      os.path.join(model_file_folder, 'decoder_rnn_model.onnx'),
-                      verbose=True, input_names=input_names, output_names=output_names)
+    # decoder_rnn_input = (torch.randn(1, decoder_rnn.input_size),
+    #                      coreml_decoder_rnn.init_hidden(batch_size=1))
+    # input_names = ['input']
+    # output_names = []
+    # for layer_index in range(decoder_rnn.num_layers):
+    #     input_names += ['h{}'.format(layer_index), 'c{}'.format(layer_index)]
+    #     output_names += ['h{}'.format(layer_index), 'c{}'.format(layer_index)]
+    # torch.onnx.export(coreml_decoder_rnn, decoder_rnn_input,
+    #                   os.path.join(model_file_folder, 'decoder_rnn_model.onnx'),
+    #                   verbose=True, input_names=input_names, output_names=output_names)
 
 
     attn = model[1].decoder.attn
-    input_names = ['rnn_output']
-    output_names = ['output']
-    rnn_output = torch.rand(1, 1, decoder_rnn.hidden_size)
-    torch.onnx.export(attn.linear_in, (rnn_output, ),
-                      os.path.join(model_file_folder, 'attn_linear_in.onnx'),
-                      verbose=True, input_names=input_names, output_names=output_names
-                      )
-    input_names = ['input']
-    output_names = ['output']
-    input = torch.rand(1, 1, 2 * decoder_rnn.hidden_size)
-    torch.onnx.export(attn.linear_out, (input, ),
-                      os.path.join(model_file_folder, 'attn_linear_out.onnx'),
-                      verbose=True, input_names=input_names, output_names=output_names
-                      )
+    # input_names = ['rnn_output']
+    # output_names = ['output']
+    # rnn_output = torch.rand(1, 1, decoder_rnn.hidden_size)
+    # torch.onnx.export(attn.linear_in, (rnn_output, ),
+    #                   os.path.join(model_file_folder, 'attn_linear_in.onnx'),
+    #                   verbose=True, input_names=input_names, output_names=output_names
+    #                   )
+    # input_names = ['input']
+    # output_names = ['output']
+    # input = torch.rand(1, 1, 2 * decoder_rnn.hidden_size)
+    # torch.onnx.export(attn.linear_out, (input, ),
+    #                   os.path.join(model_file_folder, 'attn_linear_out.onnx'),
+    #                   verbose=True, input_names=input_names, output_names=output_names
+    #                   )
 
 
     generator = model[1].generator
-    input_names = ['input']
-    output_names = ['output']
-    input = torch.rand(1, decoder_rnn.hidden_size)
-    torch.onnx.export(generator, (input, ),
-                      os.path.join(model_file_folder, 'generator.onnx'),
-                      verbose=True, input_names=input_names, output_names=output_names
-                      )
+    # input_names = ['input']
+    # output_names = ['output']
+    # input = torch.rand(1, decoder_rnn.hidden_size)
+    # torch.onnx.export(generator, (input, ),
+    #                   os.path.join(model_file_folder, 'generator.onnx'),
+    #                   verbose=True, input_names=input_names, output_names=output_names
+    #                   )
 
 
     translate_with_submodels(src_file='src-test.txt', fields=translator.fields, src_embeddings=src_embeddings, decomposed_encoders=encoder_models,
