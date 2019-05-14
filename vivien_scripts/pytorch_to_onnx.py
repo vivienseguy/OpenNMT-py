@@ -141,7 +141,6 @@ def pytorch_to_onnx(opt):
     model = onmt.model_builder.load_test_model(opt)
     print(model)
 
-
     src_embeddings = model[1].encoder.embeddings
     # embeddings_input = torch.zeros((1, 1, 1)).long()
     # input_names = ['input_index']
@@ -186,7 +185,7 @@ def pytorch_to_onnx(opt):
     for layer_index in range(decoder_rnn.num_layers):
         for coreml_key in coreml_model_state_dict:
             if 'rnn_cell' in coreml_key:
-                rnn_key = re.sub(r'rnn_cell\d\.', '', coreml_key) + '_l' + '{}'.format(layer_index)
+                rnn_key = re.sub(r'rnn_cell\d\.', '', coreml_key) + '_l' + coreml_key[len('rnn_cell')]
                 coreml_model_state_dict[coreml_key] = state_dict[rnn_key]
         coreml_decoder_rnn.load_state_dict(coreml_model_state_dict)
     # decoder_rnn_input = (torch.randn(1, decoder_rnn.input_size),
