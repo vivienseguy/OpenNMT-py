@@ -114,7 +114,7 @@ class EncoderForCoreMLExport(nn.Module):
                 final_cs.append(c_t)
                 input_sequence = output_sequence
 
-        return list(zip(final_hs, final_cs)), torch.stack(input_sequence)
+        return torch.stack(input_sequence), list(zip(final_hs, final_cs))
 
 
 
