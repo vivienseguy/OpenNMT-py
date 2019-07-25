@@ -6,8 +6,13 @@ import coremltools
 import json
 
 
-model_file_folder = '/Volumes/Extreme SSD/OpenNMTModels/xp64/demo_jp-en_25k-model_step_2000000'
-meta_data = {"version": "1"}
+model_file_folder = '/Volumes/Extreme SSD/OpenNMTModels/xp73/demo_jp-en_25k-model_step_2000000'
+folder_to_compress = '/Volumes/Extreme SSD/OpenNMTModels/xp73/demo_jp-en_25k-model_step_2000000/folder_to_compress'
+if not os.path.exists(folder_to_compress):
+    os.mkdir(folder_to_compress)
+
+
+meta_data = {"version": "3"}
 
 def onnx_to_coreml():
 
